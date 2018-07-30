@@ -9,6 +9,7 @@ const redis = require('redis');
 const smtp = require('smtp-protocol');
 const util = require('util');
 const isSpecialUser = require('./util').isSpecialUser;
+const jsonStringifyMap = require('./json-stringify-map');
 
 const HOSTNAME = process.env.EMAIL_HOSTNAME || 'restmail.net';
 const IS_TEST = process.env.NODE_ENV === 'test';
@@ -74,13 +75,33 @@ var server = smtp.createServer(HOSTNAME, function (req) {
   });
 
   req.on('message', function (stream, ack) {
-    var mailparser = new MailParser({
-      streamAttachments: true
-    });
+    const mailparser = new MailParser();
+    let headers; // eslint-disable-line no-unused-vars
 
     stream.pipe(mailparser);
 
-    mailparser.on('end', (function(users, mail) {
+    mailparser.on('headers', (headers_) => {
+      console.log('headers ->', jsonStringifyMap(headers_));
+      headers = headers_;
+    });
+
+    mailparser.on('data', (data) => {
+      console.log('data ->', JSON.stringify(data));
+      // put it and the headers in redis here.
+
+    });
+
+    mailparser.on('end', () => {
+      console.log('end');
+      ack.accept(354, 'OK');
+      users = [];
+    });
+
+    mailparser.on('error', (error) => {
+      console.log('error', error);
+    });
+
+    mailparser.on('endOld', (function(users, mail) {
       mail.receivedAt = new Date().toISOString();
       log('Received message for', users, mailSummary(mail));
       users.forEach(function(user) {
@@ -137,12 +158,13 @@ var server = smtp.createServer(HOSTNAME, function (req) {
 
 // handle starting from the command line or the test harness
 if (process.argv[1] === __filename) {
-  var port = process.env.PORT || 9025;
+  const port = process.env.PORT || 9025;
   log('Starting up on port', port);
   server.listen(port);
 } else {
+  const port = process.env.PORT || 0;
   module.exports = function(cb) {
-    server.listen(0, function(err) {
+    server.listen(port, function(err) {
       cb(err, server.address().port);
     });
   };
